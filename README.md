@@ -18,13 +18,13 @@ The framework now:
 
 All the framework changes for this assignment are in a single commit:
 
-**[`<COMMIT_HASH>`](../../commit/<COMMIT_HASH>)**:
-*Implement concurrent request handling and graceful shutdown*
+**[`e10231c313b8eb36c664d081d48ae396a3385bcb`](../../commit/e10231c313b8eb36c664d081d48ae396a3385bcb)**:
+*Implement concurrent request handling, graceful shutdown and Docker deployment*
 
 To see exactly what the commit changed:
 
 ```bash
-git show <COMMIT_HASH> --stat
+git show e10231c --stat
 ```
 
 ## 1. What changed in the framework
@@ -251,7 +251,7 @@ docker push sebassilva08/framework-extension:latest
 ### 6.2 Install Docker on the instance
 
 ```bash
-ssh -i labsuser.pem ec2-user@<EC2_PUBLIC_IP>
+ssh -i labsuser.pem ec2-user@100.52.211.105
 
 sudo dnf update -y
 sudo dnf install -y docker
@@ -263,7 +263,7 @@ exit          # log in again so the docker group applies
 ### 6.3 Run the image from Docker Hub
 
 ```bash
-ssh -i labsuser.pem ec2-user@<EC2_PUBLIC_IP>
+ssh -i labsuser.pem ec2-user@100.52.211.105
 
 docker run -d --name framework --restart unless-stopped \
   -p 42000:8080 \
@@ -276,40 +276,78 @@ docker logs framework
 
 ### 6.4 Public URL
 
-- **Public URL:** http://<EC2_PUBLIC_IP>:42000/
+- **Public URL:** http://100.52.211.105:42000/
 
 | URL | Expected result |
 |---|---|
-| `http://<EC2_PUBLIC_IP>:42000/` | Static `index.html` |
-| `http://<EC2_PUBLIC_IP>:42000/hello?name=Sebas` | `Hello Sebas` |
-| `http://<EC2_PUBLIC_IP>:42000/pi` | `3.141592653589793` |
-| `http://<EC2_PUBLIC_IP>:42000/slow?ms=3000` | `Done after 3000 ms on http-worker-N` |
-| `http://<EC2_PUBLIC_IP>:42000/shutdown` | `404 Not Found` (production) |
+| `http://100.52.211.105:42000/` | Static `index.html` |
+| `http://100.52.211.105:42000/hello?name=Sebas` | `Hello Sebas` |
+| `http://100.52.211.105:42000/pi` | `3.141592653589793` |
+| `http://100.52.211.105:42000/slow?ms=3000` | `Done after 3000 ms on http-worker-N` |
+| `http://100.52.211.105:42000/shutdown` | `404 Not Found` (production) |
 
 ## 7. Evidence
 
-<!-- Replace each TODO with the corresponding screenshot. -->
+### 7.1 Local Docker image and container
 
-### 7.1 Tests passing
-TODO: screenshot of `mvn clean package` showing `Tests run: 3, Failures: 0`.
+The `framework-extension` image built from the `Dockerfile`:
 
-### 7.2 Docker image and local containers
-TODO: screenshots of `docker images`, `docker ps` and the app open on `localhost:34000`.
+![framework-extension image in Docker Desktop](images/image-6.png)
 
-### 7.3 Image on Docker Hub
-TODO: screenshot of the repository page on hub.docker.com.
+The container running locally (`-p 34000:8080`), serving the static page and the `/hello` endpoint:
 
-### 7.4 Container running on EC2
-TODO: screenshots of `docker ps` on the instance and of the security group's inbound rules.
+![Static page served from the local container](images/image-4.png)
 
-### 7.5 App reachable at the public EC2 URL
-TODO: screenshots of `/`, `/hello?name=Sebas` and `/pi` in the browser.
+![GET /hello from the local container](images/image-5.png)
 
-### 7.6 Concurrency on EC2
-TODO: screenshot of 5 parallel `/slow?ms=2000` requests finishing in ~2 s, plus `docker logs framework` showing different `http-worker-N` threads.
+### 7.2 Concurrency in the local container
 
-### 7.7 Graceful shutdown on EC2
-TODO: screenshot of `docker stop framework` while a `/slow` request is in progress, with `docker logs framework` showing `Shutdown signal received` and `Server stopped gracefully.`
+Five `/slow?ms=2000` requests sent at the same time finish in **2.13 s** instead of ~10 s.
+The log shows each one handled by a different worker thread:
 
-### 7.8 Video
-TODO: link to the video that shows the deployment and tests.
+![Parallel requests against the local container](images/image-7.png)
+
+### 7.3 Graceful shutdown in the local container
+
+A `/slow?ms=5000` request was in progress when `docker stop fw1` sent SIGTERM. The request
+still received its full response:
+
+![In-flight request completes during docker stop](images/image-8.png)
+
+The container log shows the shutdown hook stopping the server only after that request finished:
+
+![Container log: Shutdown signal received, Server stopped gracefully](images/image-9.png)
+
+### 7.4 Image on Docker Hub
+
+![sebassilva08/framework-extension on Docker Hub](images/image-10.png)
+
+### 7.5 Container running on AWS EC2
+
+The image was pulled from Docker Hub and started on the EC2 instance with the port mapping `42000:8080`:
+
+![docker run and docker ps on the EC2 instance](images/image-11.png)
+
+### 7.6 Public endpoints on EC2
+
+`GET /hello?name=Sebas`:
+
+![GET /hello on EC2](images/image-12.png)
+
+`GET /pi`:
+
+![GET /pi on EC2](images/image-13.png)
+
+`GET /shutdown` returns `404 Not Found`, because the route is not registered with `APP_ENV=production`:
+
+![GET /shutdown returns 404 on EC2](images/image-14.png)
+
+### 7.7 Concurrency on EC2
+
+Five `/slow?ms=2000` requests sent to the public URL at the same time finish in **2.36 s**, including network latency:
+
+![Parallel requests against EC2](images/image-15.png)
+
+In the container log on the instance, each request is handled by a different worker (`http-worker-1` to `http-worker-5`):
+
+![docker logs on EC2 showing parallel workers](images/image-16.png)
